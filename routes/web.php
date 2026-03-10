@@ -40,4 +40,5 @@ Route::middleware('auth')->group(function () {
 
     // Live voice (no conversation)
     Route::post('/chat/live/respond', [LiveController::class, 'respond'])->name('live.respond');
+    Route::post('/chat/live/end', [LiveController::class, 'endSession'])->name('live.end');
 });

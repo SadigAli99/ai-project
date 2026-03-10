@@ -16,6 +16,7 @@ class RespondRequest extends FormRequest
         return [
             'audio' => ['required', 'file', 'mimes:webm,wav,mp3,m4a,ogg', 'max:10240'],
             'history' => ['nullable', 'json'],
+            'session_id' => ['nullable', 'integer', 'exists:live_sessions,id'],
         ];
     }
 }

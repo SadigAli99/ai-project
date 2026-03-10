@@ -37,6 +37,7 @@ export function createLiveChat() {
         timerInterval: null,
         silenceStart: 0,
         history: [],
+        sessionId: null,
     };
 
     function csrfToken() {
@@ -197,6 +198,7 @@ export function createLiveChat() {
             const fd = new FormData();
             fd.append('audio', blob, 'live.webm');
             fd.append('history', JSON.stringify(live.history));
+            if (live.sessionId) fd.append('session_id', live.sessionId);
 
             const res = await fetch('/chat/live/respond', {
                 method: 'POST',
@@ -206,6 +208,8 @@ export function createLiveChat() {
 
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
+
+            if (data.session_id) live.sessionId = data.session_id;
 
             if (data.transcript) {
                 live.history.push({ role: 'user', content: data.transcript });
@@ -306,8 +310,17 @@ export function createLiveChat() {
         }
     }
 
+    function endSessionOnServer() {
+        if (!live.sessionId) return;
+        const fd = new FormData();
+        fd.append('session_id', live.sessionId);
+        fd.append('_token', csrfToken());
+        navigator.sendBeacon('/chat/live/end', fd);
+    }
+
     function stopLive() {
         if (live.state === 'IDLE') return;
+        endSessionOnServer();
 
         if (live.mediaRecorder?.state !== 'inactive') {
             try { live.mediaRecorder.stop(); } catch {}
@@ -332,6 +345,7 @@ export function createLiveChat() {
         live.state = 'IDLE';
         live.silenceStart = 0;
         live.history = [];
+        live.sessionId = null;
 
         setButtons(false);
         setStatus('', 'Hazırdır');
