@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\UserRole;
+use App\Events\AiTyping;
 use App\Events\MessageSent;
 use App\Models\Message;
 use App\Services\OpenAIService;
@@ -49,11 +50,12 @@ class ProcessTextMessageJob implements ShouldQueue
             'meta' => $meta,
         ]);
 
-        // Respond to message
+        // Notify frontend that AI is typing
+        broadcast(new AiTyping($conversation->id, 'text'));
 
-        $aiPrompt = ChatPrompt::build($conversation->id);
+        $aiMessages = ChatPrompt::buildMessages($conversation->id);
 
-        $aiResponse = $openAIService->generateResponse($aiPrompt);
+        $aiResponse = $openAIService->generateResponse($aiMessages);
 
         $aiMessage = Message::create([
             'user_id' => null,

@@ -3,8 +3,8 @@
 <aside class="live-panel" id="livePanel" aria-hidden="true">
     <div class="live-panel-header">
         <div>
-            <h3>Canlı Səs Rejimi <span class="badge-mini">UI</span></h3>
-            <p>Backend qoşulmadan əvvəl live səs UI + həssaslıq ayarlarının test paneli</p>
+            <h3>Canlı Səs Rejimi</h3>
+            <p>AI ilə canlı səsli söhbət — danış, fasilə ver, cavab al</p>
         </div>
         <button class="icon-btn" id="closeLivePanelBtn" type="button" title="Bağla">✕</button>
     </div>

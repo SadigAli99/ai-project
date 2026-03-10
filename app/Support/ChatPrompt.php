@@ -8,10 +8,19 @@ use Illuminate\Support\Str;
 
 class ChatPrompt
 {
-    public static function build(int $conversationId, int $limit = 25): string
+    public static function systemPrompt(): string
     {
-        $aiName = config('chat.ai_name');
+        $aiName = config('app.name', 'Callini');
 
+        return "Sənin adın {$aiName}-dir. İstifadəçi səndən adını soruşsa, dəqiq belə cavab ver: 'Mənim adım {$aiName}-dir'.\n" .
+            "Sən Azərbaycan dilində danışan faydalı bir köməkçisən.\n" .
+            "Söhbətin tarixçəsinə uyğun cavab ver, ziddiyyət olmasın.\n" .
+            "Əgər istifadəçi özü haqqında məlumat veribsə (ad, iş, yaş və s.), onu yadda saxla və uyğun cavab ver.\n" .
+            "Cavabı yalnız cavab kimi yaz (əlavə izah/format vermə).";
+    }
+
+    public static function buildMessages(int $conversationId, int $limit = 25): array
+    {
         $items = Message::query()
             ->where('conversation_id', $conversationId)
             ->orderBy('id', 'desc')
@@ -20,25 +29,24 @@ class ChatPrompt
             ->reverse()
             ->values();
 
-        $lines = [];
+        $messages = [];
 
         foreach ($items as $m) {
             $text = trim((string) $m->content);
 
             if ($text === '') continue;
 
-            $text = preg_replace('/\+s/', ' ', $text);
-            $text = Str::limit($text, 450);
+            $text = preg_replace('/\s+/', ' ', $text);
+            $text = Str::limit($text, 1000);
 
-            $who = $m->role === UserRole::AI ? 'AI' : 'User';
-            $lines[] = "{$who}: {$text}";
+            $role = $m->role === UserRole::AI ? 'assistant' : 'user';
+
+            $messages[] = [
+                'role' => $role,
+                'content' => $text,
+            ];
         }
 
-        return "Sənin adın {$aiName}-dir. İstifadəçi səndən adını soruşsa, dəqiq belə cavab ver : 'Mənim adım {$aiName}-dir'.\n" .
-            " Sən Azərbaycan dilində danışan faydalı bir köməkçisən.\n" .
-            "Aşağıda söhbətin tarixi var. Tarixçəyə uyğun cavab ver, ziddiyyət olmasın.\n" .
-            "Əgər user özü haqqında məlumat veribsə (ad, iş, və s.), onu yadda saxla və uyğun cavab ver.\n\n" .
-            implode("\n", $lines) .
-            "\n\nCavabı yalnız cavab kimi yaz (əlavə izah/format vermə).";
+        return $messages;
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\UserRole;
+use App\Events\AiTyping;
 use App\Events\MessageSent;
 use App\Models\Message;
 use App\Services\OpenAIService;
@@ -63,9 +64,12 @@ class ProcessAudioMessageJob implements ShouldQueue
             ]);
         }
 
+        // Notify frontend that AI is preparing audio response
+        broadcast(new AiTyping($conversation->id, 'audio'));
+
         // 2. Respond to transcript text
-        $aiPrompt = ChatPrompt::build($conversation->id);
-        $aiResponse = $openAIService->generateResponse($aiPrompt);
+        $aiMessages = ChatPrompt::buildMessages($conversation->id);
+        $aiResponse = $openAIService->generateResponse($aiMessages);
 
         if (!$aiResponse) return;
 

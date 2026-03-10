@@ -3,6 +3,7 @@
 use App\Http\Controllers\Auth\SocialController;
 use App\Http\Controllers\Chat\ChatController;
 use App\Http\Controllers\Chat\ConversationController;
+use App\Http\Controllers\Chat\LiveController;
 use App\Http\Controllers\Chat\MessageController;
 use Illuminate\Support\Facades\Route;
 
@@ -36,4 +37,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/chat/messages/{conversation}/list', [MessageController::class, 'index'])->name('messages.list');
     Route::post('/chat/messages/{conversation}/send-text', [MessageController::class, 'sendText'])->name('messages.send-text');
     Route::post('/chat/message/{conversation}/send-audio', [MessageController::class, 'sendAudio'])->name('messages.send-audio');
+
+    // Live voice (no conversation)
+    Route::post('/chat/live/respond', [LiveController::class, 'respond'])->name('live.respond');
 });

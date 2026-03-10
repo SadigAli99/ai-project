@@ -12,6 +12,8 @@ import {
     apiDeleteConversation,
 } from './backend';
 
+import { createLiveChat } from './live';
+
 document.addEventListener('DOMContentLoaded', () => {
     const app = document.getElementById('chatApp');
     const body = document.body;
@@ -176,8 +178,10 @@ document.addEventListener('DOMContentLoaded', () => {
         scrollMessagesToBottom();
     }
 
-    function addTypingIndicator() {
+    function addTypingIndicator(type = 'text') {
         if (!chatMessages) return null;
+        removeTypingIfAny();
+        const label = type === 'audio' ? 'Səs hazırlayır...' : 'Yazır...';
         const row = document.createElement('div');
         row.className = 'message-row ai typing';
         row.innerHTML = `
@@ -185,7 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="message-bubble-wrap">
         <div class="message-bubble">
           <span class="typing-dots"><i></i><i></i><i></i></span>
-          <span>Yazır...</span>
+          <span>${label}</span>
         </div>
       </div>
     `;
@@ -194,7 +198,141 @@ document.addEventListener('DOMContentLoaded', () => {
         return row;
     }
 
-    function appendAiAudioMessage(audioUrl, labelText = 'Səsli cavab') {
+    // --------------------------
+    // Custom audio player with frequency visualizer
+    // --------------------------
+    function audioPlayerHTML(label, transcript = '') {
+        const hasTranscript = transcript.trim().length > 0;
+        return `
+            <div class="audio-player-card">
+                <button type="button" class="audio-play-btn" aria-label="Play">
+                    <svg viewBox="0 0 24 24" class="ap-play-icon"><polygon points="7,4 21,12 7,20"/></svg>
+                    <svg viewBox="0 0 24 24" class="ap-pause-icon"><rect x="5" y="4" width="4" height="16"/><rect x="15" y="4" width="4" height="16"/></svg>
+                </button>
+                <canvas class="audio-wave-canvas" width="240" height="36"></canvas>
+                <span class="audio-player-time">0:00</span>
+                <audio preload="metadata"></audio>
+            </div>
+            <div class="audio-message-bottom">
+                <span class="audio-message-meta">${label}</span>
+                <button type="button" class="audio-transcript-btn${hasTranscript ? '' : ' hidden'}" title="Mətni göstər">
+                    <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h14"/></svg>
+                    <span>Çevir</span>
+                </button>
+            </div>
+            <div class="audio-transcript hidden"${hasTranscript ? ` data-transcript="${escapeHtml(transcript)}"` : ''}>${hasTranscript ? escapeHtml(transcript) : ''}</div>
+        `;
+    }
+
+    function initAudioPlayer(container) {
+        if (!container || container.dataset.apInit) return;
+        container.dataset.apInit = '1';
+
+        const audio = container.querySelector('audio');
+        const canvas = container.querySelector('.audio-wave-canvas');
+        const playBtn = container.querySelector('.audio-play-btn');
+        const timeEl = container.querySelector('.audio-player-time');
+        if (!audio || !canvas || !playBtn) return;
+
+        const ctx = canvas.getContext('2d');
+        let audioCtx, analyser, rafId;
+        let connected = false;
+        const barCount = 32;
+
+        function drawBars(getData) {
+            const W = canvas.width;
+            const H = canvas.height;
+            const cy = H / 2;
+            const gap = 2;
+            const bw = (W - gap * (barCount - 1)) / barCount;
+
+            ctx.clearRect(0, 0, W, H);
+
+            for (let i = 0; i < barCount; i++) {
+                const val = getData(i);
+                const bh = Math.max(2, val * H * 0.85);
+                const x = i * (bw + gap);
+                const y = cy - bh / 2;
+                const hue = 120 - val * 120;
+                ctx.fillStyle = `hsla(${hue}, 80%, 55%, ${0.5 + val * 0.5})`;
+                ctx.beginPath();
+                ctx.roundRect(x, y, bw, bh, bw / 2);
+                ctx.fill();
+            }
+        }
+
+        function drawIdle() {
+            drawBars((i) => 0.04 + Math.sin(i * 0.7) * 0.03);
+        }
+
+        function startVisualize() {
+            if (!analyser) return;
+            const freqData = new Uint8Array(analyser.frequencyBinCount);
+            const step = Math.floor(freqData.length / barCount);
+
+            const loop = () => {
+                if (audio.paused || audio.ended) return;
+                analyser.getByteFrequencyData(freqData);
+                drawBars((i) => {
+                    let v = 0;
+                    for (let j = 0; j < step; j++) v += freqData[i * step + j];
+                    return v / step / 255;
+                });
+                rafId = requestAnimationFrame(loop);
+            };
+            loop();
+        }
+
+        function updateTime() {
+            if (!timeEl) return;
+            const t = audio.currentTime || 0;
+            const mm = String(Math.floor(t / 60));
+            const ss = String(Math.floor(t % 60)).padStart(2, '0');
+            timeEl.textContent = `${mm}:${ss}`;
+        }
+
+        function setPlayState(playing) {
+            playBtn.querySelector('.ap-play-icon').style.display = playing ? 'none' : '';
+            playBtn.querySelector('.ap-pause-icon').style.display = playing ? '' : 'none';
+        }
+
+        playBtn.addEventListener('click', () => {
+            if (audio.paused) {
+                // Pause all other players
+                document.querySelectorAll('.audio-player-card audio').forEach((a) => {
+                    if (a !== audio && !a.paused) a.pause();
+                });
+
+                if (!connected) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    const src = audioCtx.createMediaElementSource(audio);
+                    analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 128;
+                    analyser.smoothingTimeConstant = 0.75;
+                    src.connect(analyser);
+                    analyser.connect(audioCtx.destination);
+                    connected = true;
+                }
+                audioCtx.resume();
+                audio.play();
+            } else {
+                audio.pause();
+            }
+        });
+
+        audio.addEventListener('play', () => { setPlayState(true); startVisualize(); });
+        audio.addEventListener('pause', () => { setPlayState(false); if (rafId) cancelAnimationFrame(rafId); });
+        audio.addEventListener('ended', () => { setPlayState(false); if (rafId) cancelAnimationFrame(rafId); drawIdle(); });
+        audio.addEventListener('timeupdate', updateTime);
+
+        drawIdle();
+    }
+
+    function initAllAudioPlayers() {
+        document.querySelectorAll('.audio-player-card').forEach(initAudioPlayer);
+    }
+
+    function appendAiAudioMessage(audioUrl, labelText = 'Səsli cavab', transcript = '') {
         if (!chatMessages) return;
         const row = document.createElement('div');
         row.className = 'message-row ai';
@@ -203,8 +341,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="message-bubble-wrap">
         <div class="message-bubble message-bubble--audio">
             <div class="audio-message-card">
-            <audio controls preload="metadata"></audio>
-            <div class="audio-message-meta">🔊 ${escapeHtml(labelText)}</div>
+                ${audioPlayerHTML('🔊 ' + escapeHtml(labelText), transcript)}
           </div>
         </div>
         <div class="message-meta">AI • ${nowLabel()}</div>
@@ -212,6 +349,7 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
         row.querySelector('audio').src = audioUrl;
         chatMessages.appendChild(row);
+        initAudioPlayer(row.querySelector('.audio-player-card'));
         scrollMessagesToBottom();
     }
 
@@ -250,8 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="message-bubble-wrap">
         <div class="message-bubble message-bubble--audio">
             <div class="audio-message-card">
-                <audio controls preload="metadata"></audio>
-                <div class="audio-message-meta">🎤 Səsli mesaj • ${escapeHtml(formatTime(durationSec))}</div>
+                ${audioPlayerHTML('🎤 Səsli mesaj • ' + escapeHtml(formatTime(durationSec)))}
           </div>
         </div>
         <div class="message-meta">Sən • ${nowLabel()}</div>
@@ -260,6 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
         row.querySelector('audio').src = url;
         chatMessages.appendChild(row);
+        initAudioPlayer(row.querySelector('.audio-player-card'));
         scrollMessagesToBottom();
     }
 
@@ -305,6 +443,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (meta.type === 'audio' && (meta.url || m.audio_path)) {
                 const url = meta.url || m.audio_path;
+                const transcript = (m.content || '').trim();
                 const row = document.createElement('div');
                 row.className = `message-row ${role === 'ai' ? 'ai' : 'user'}`;
                 row.innerHTML =
@@ -314,8 +453,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <div class="message-bubble-wrap">
                 <div class="message-bubble message-bubble--audio">
                     <div class="audio-message-card">
-                        <audio controls preload="metadata"></audio>
-                        <div class="audio-message-meta">🎤 Audio</div>
+                        ${audioPlayerHTML('🎤 Audio', transcript)}
                   </div>
                 </div>
                 <div class="message-meta">AI • ${escapeHtml(time)}</div>
@@ -323,10 +461,9 @@ document.addEventListener('DOMContentLoaded', () => {
             `
                         : `
               <div class="message-bubble-wrap">
-                <div class="message-bubble">
+                <div class="message-bubble message-bubble--audio">
                   <div class="audio-message-card">
-                    <audio controls preload="metadata"></audio>
-                    <div class="audio-message-meta">🎤 Audio</div>
+                    ${audioPlayerHTML('🎤 Audio', transcript)}
                   </div>
                 </div>
                 <div class="message-meta">Sən • ${escapeHtml(time)}</div>
@@ -362,12 +499,15 @@ document.addEventListener('DOMContentLoaded', () => {
             chatMessages.appendChild(row);
         });
 
+        initAllAudioPlayers();
         scrollMessagesToBottom();
     }
 
     // --------------------------
     // Realtime subscribe (text + audio)
     // --------------------------
+    let onAiAudioReceived = null;
+
     function subscribeToConversation(conversationId) {
         if (!conversationId || !window.Echo) return;
 
@@ -378,6 +518,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         window.Echo
             .private(`conversation.${conversationId}`)
+            .listen('.ai.typing', (p) => {
+                if (getActiveConversationId() !== p.conversation_id) return;
+                addTypingIndicator(p.type || 'text');
+            })
             .listen('.message.sent', (p) => {
                 if (!p?.id) return;
                 if (state.seenIds.has(p.id)) return;
@@ -391,8 +535,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const role = typeof p.role === 'string' ? p.role : p.role?.value;
 
                 if (role === 'ai' && meta.type === 'audio' && meta.url) {
-                    appendAiAudioMessage(meta.url, p.content || 'Səsli cavab');
+                    appendAiAudioMessage(meta.url, p.content || 'Səsli cavab', p.content || '');
                     setChatPreview(state.activeChatEl, '🔊 Səsli cavab');
+                    if (onAiAudioReceived) onAiAudioReceived(meta.url);
                     return;
                 }
 
@@ -939,14 +1084,36 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --------------------------
+    // Transcript toggle (event delegation)
+    // --------------------------
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('.audio-transcript-btn');
+        if (!btn) return;
+
+        const card = btn.closest('.audio-message-card');
+        if (!card) return;
+
+        const transcriptEl = card.querySelector('.audio-transcript');
+        if (!transcriptEl) return;
+
+        const isHidden = transcriptEl.classList.contains('hidden');
+        transcriptEl.classList.toggle('hidden');
+        btn.classList.toggle('active', isHidden);
+    });
+
+    // --------------------------
     // Init
     // --------------------------
     renderConversationList().catch((err) => showSystemAiMessage(`Xəta: ${err.message}`));
+
+    // Live voice chat (conversation-independent)
+    const liveChat = createLiveChat();
 
     // Cleanup
     window.addEventListener('beforeunload', () => {
         stopRecordMonitor();
         stopRecordTimer();
         stopRecordStreamTracks();
+        liveChat.destroy();
     });
 });

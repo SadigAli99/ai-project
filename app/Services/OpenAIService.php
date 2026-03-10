@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\ChatPrompt;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -22,7 +23,6 @@ class OpenAIService
                 'temperature' => 0.0,
                 'response_format' => 'json',
 
-                // ✅ prompt-u daha konkret et (xüsusi adları qorumağa kömək edir)
                 'prompt' =>
                 "Bu Azərbaycan dilində danışıqdır. " .
                     "Mətnə heç nə əlavə etmə, yalnız eşitdiyini yaz. " .
@@ -48,20 +48,18 @@ class OpenAIService
         }
     }
 
-    public function generateResponse(string $transcriptText)
+    public function generateResponse(array $messages)
     {
         $aiText = null;
 
         try {
-
             $response = Http::withToken(config('openai.api_key'))
                 ->timeout(60)
                 ->post('https://api.openai.com/v1/responses', [
                     'model' => 'gpt-5.2',
-                    'instructions' => 'Transcribe exactly what you hear. Keep proper names unchanged.',
-                    'input' => $transcriptText,
-                    // 'temperature' => 0.3,
-                    'max_output_tokens' => 200,
+                    'instructions' => ChatPrompt::systemPrompt(),
+                    'input' => $messages,
+                    'max_output_tokens' => 500,
                     'store' => false,
                     'reasoning' => ['effort' => 'medium'],
                 ]);
@@ -127,6 +125,35 @@ class OpenAIService
         } catch (\Throwable $ex) {
             Log::error('OpenAI TTS exception : ' . $ex->getMessage());
             return '';
+        }
+    }
+
+    /**
+     * Live mode: TTS without saving to disk — returns raw MP3 bytes.
+     */
+    public function ttsRaw(string $text): ?string
+    {
+        try {
+            $text = trim($text);
+            if ($text === '') return null;
+
+            $text = mb_substr($text, 0, 4000);
+
+            $response = Http::withToken(config('openai.api_key'))
+                ->asJson()
+                ->post('https://api.openai.com/v1/audio/speech', [
+                    'model' => 'gpt-4o-mini-tts',
+                    'voice' => 'coral',
+                    'input' => $text,
+                    'response_format' => 'mp3',
+                    'instructions' => 'Azərbaycan dilində səlis və təbii fonda danış',
+                    'speed' => 1.0,
+                ]);
+
+            return $response->successful() ? $response->body() : null;
+        } catch (\Throwable $e) {
+            Log::error('OpenAI TTS raw exception: ' . $e->getMessage());
+            return null;
         }
     }
 }
